@@ -45,8 +45,9 @@ img{display:block;max-width:100%}
 .content{opacity:0;transition:opacity 1.4s ease}
 .scene-in .content{opacity:1}
 
-/* jardín generado en canvas a partir de regiones de follaje de la foto */
-#garden{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+/* jardín generado a partir de regiones de follaje de la foto */
+#garden{position:absolute;inset:0;overflow:hidden;z-index:0}
+.gtile{position:absolute;will-change:transform;backface-visibility:hidden}
 .bg::after{
   content:"";position:absolute;inset:0;z-index:1;pointer-events:none;
   background:linear-gradient(180deg,rgba(6,14,10,.5),rgba(6,14,10,.12) 42%,rgba(5,11,8,.92));
@@ -284,6 +285,17 @@ section{position:relative}
 .firma{margin-top:clamp(40px,7vh,80px);padding-top:22px;border-top:1px solid rgba(244,241,233,.1);
   font-size:10px;letter-spacing:.4em;text-transform:uppercase;color:rgba(244,241,233,.42)}
 
+/* ---- móvil: se apagan los efectos de composición caros ---- */
+@media (max-width:900px),(pointer:coarse){
+  .grain{display:none}                     /* capa overlay a pantalla completa */
+  .rays{animation:none;opacity:.14}
+  .panel{backdrop-filter:none;-webkit-backdrop-filter:none;
+         background:linear-gradient(180deg,rgba(8,15,11,.90),rgba(8,15,11,.95))}
+  .parents__rim{mix-blend-mode:normal;opacity:.22}
+  .parents img{filter:drop-shadow(0 18px 22px rgba(0,0,0,.55)) contrast(1.05) brightness(.9)}
+  .medallon{box-shadow:0 12px 30px rgba(0,0,0,.5)}
+}
+
 @media (max-width:820px){
   .col{max-width:100%}
   .band{padding:clamp(80px,14vh,140px) 0}
@@ -314,7 +326,7 @@ section{position:relative}
 <!-- ===================== ESCENA VIVA ===================== -->
 <div class="scene" aria-hidden="true">
   <div class="scene__world" id="world">
-    <canvas id="garden" class="amb"></canvas>
+    <div id="garden" class="amb"></div>
     <div class="bg amb" aria-hidden="true"></div>
     <div class="sun amb" id="sun"></div>
     <div class="rays amb"></div>
@@ -508,7 +520,12 @@ document.querySelectorAll(".col").forEach(w=>{
    JARDÍN DE FONDO — mosaico espejado de follaje real de la foto
    (solo se usan regiones donde NO aparecen las personas)
    ============================================================= */
-const gardenC=document.getElementById("garden"),gctx=gardenC.getContext("2d");
+/* Dispositivos táctiles / pantallas pequeñas: modo ligero.
+   El jardín se pinta UNA sola vez y luego solo se desplaza por GPU. */
+const LOW = matchMedia("(max-width:900px)").matches || matchMedia("(pointer:coarse)").matches
+            || (navigator.hardwareConcurrency||8)<=4;
+
+const gardenWrap=document.getElementById("garden");
 const srcImg=new Image();
 let tileFar=null,tileNear=null,gardenReady=false,GW=0,GH=0;
 
@@ -522,7 +539,9 @@ const FOLLAJE=[
 ];
 
 function buildTile(blurPx,bright,scale){
-  const w=Math.ceil(innerWidth*scale),h=Math.ceil(innerHeight*scale);
+  const q=LOW?0.6:1;                    // en móvil se pinta a menor resolución
+  const cssW=Math.ceil(innerWidth*scale),cssH=Math.ceil(innerHeight*scale);
+  const w=Math.ceil(cssW*q),h=Math.ceil(cssH*q);
   const c=document.createElement("canvas");c.width=w;c.height=h;
   const x=c.getContext("2d");
   const iw=srcImg.naturalWidth,ih=srcImg.naturalHeight;
@@ -544,35 +563,37 @@ function buildTile(blurPx,bright,scale){
   // desenfoque + grading en una segunda pasada
   const o=document.createElement("canvas");o.width=w;o.height=h;
   const ox=o.getContext("2d");
-  ox.filter=`blur(${blurPx}px) saturate(1.35) brightness(${bright}) contrast(1.08) hue-rotate(-6deg)`;
+  ox.filter=`blur(${blurPx*q}px) saturate(1.35) brightness(${bright}) contrast(1.08) hue-rotate(-6deg)`;
   ox.drawImage(c,0,0);
+  o.className="gtile";
+  o.style.width=cssW+"px";o.style.height=cssH+"px";
+  o.dataset.w=cssW;o.dataset.h=cssH;
   return o;
 }
 function buildGarden(){
   if(!srcImg.complete||!srcImg.naturalWidth) return;
-  const dpr=Math.min(devicePixelRatio||1,1.5);
   GW=innerWidth;GH=innerHeight;
-  gardenC.width=GW*dpr;gardenC.height=GH*dpr;
-  gctx.setTransform(dpr,0,0,dpr,0,0);
-  tileFar =buildTile(innerWidth<820?6:9,0.44,1.35);    // lejos: leve desenfoque
-  tileNear=buildTile(innerWidth<820?2.5:4,0.60,1.20);  // medio: casi nítido
+  tileFar =buildTile(LOW?7:9,0.44,1.30);    // lejos: leve desenfoque
+  tileNear=buildTile(LOW?3:4,0.60,1.18);    // medio: casi nítido
+  tileNear.style.opacity=".62";
+  // se colocan centradas una sola vez; después solo se trasladan (GPU)
+  [tileFar,tileNear].forEach(t=>{
+    t.style.left=(-(+t.dataset.w-GW)/2)+"px";
+    t.style.top =(-(+t.dataset.h-GH)/2)+"px";
+  });
+  gardenWrap.replaceChildren(tileFar,tileNear);
   gardenReady=true;
 }
 srcImg.onload=buildGarden;
 srcImg.src="Padres-imagen-principal.jpg";
 
-function drawGarden(time,wind,p,cx,cy){
+/* solo mueve capas: cero repintado */
+function moveGarden(time,wind,p,cx,cy){
   if(!gardenReady) return;
-  gctx.clearRect(0,0,GW,GH);
-  // capa lejana: deriva lentísima
   const fx=Math.sin(time*.07)*10+cx*-14, fy=Math.cos(time*.05)*7+p*-50+cy*-8;
-  gctx.drawImage(tileFar,-(tileFar.width-GW)/2+fx,-(tileFar.height-GH)/2+fy,tileFar.width,tileFar.height);
-  // capa media: se mece con el viento
-  gctx.save();
-  gctx.globalAlpha=.62;
+  tileFar.style.transform=`translate3d(${fx.toFixed(1)}px,${fy.toFixed(1)}px,0)`;
   const nx=Math.sin(time*.34)*7+wind*16+cx*-30, ny=Math.cos(time*.27)*5+p*-110+cy*-14;
-  gctx.drawImage(tileNear,-(tileNear.width-GW)/2+nx,-(tileNear.height-GH)/2+ny,tileNear.width,tileNear.height);
-  gctx.restore();
+  tileNear.style.transform=`translate3d(${nx.toFixed(1)}px,${ny.toFixed(1)}px,0)`;
 }
 
 /* =============================================================
@@ -582,12 +603,12 @@ function makeGrass(canvas,opts){
   const ctx=canvas.getContext("2d",{alpha:true});
   let blades=[],W=0,H=0,dpr=1;
   function build(){
-    dpr=Math.min(devicePixelRatio||1,2);
+    dpr=Math.min(devicePixelRatio||1,LOW?1.25:2);
     W=innerWidth;H=Math.round(innerHeight*opts.hFrac);
     canvas.width=W*dpr;canvas.height=H*dpr;
     canvas.style.height=H+"px";
     ctx.setTransform(dpr,0,0,dpr,0,0);
-    const n=Math.round(opts.count*(W/1440)*(innerWidth<820?.62:1));
+    const n=Math.round(opts.count*(W/1440)*(LOW?.5:1));
     blades=[];
     for(let i=0;i<n;i++){
       const depth=Math.random();               // 0 = atrás, 1 = adelante
@@ -637,12 +658,23 @@ const grassFront=makeGrass(document.getElementById("grassFront"),
    ============================================================= */
 const dustC=document.getElementById("dust"),dctx=dustC.getContext("2d");
 let motes=[],DW=0,DH=0,ddpr=1;
+/* sprite del polen pre-renderizado: evita shadowBlur por partícula (carísimo en móvil) */
+const moteSprite=(()=>{
+  const s=document.createElement("canvas");s.width=s.height=32;
+  const c=s.getContext("2d");
+  const g=c.createRadialGradient(16,16,0,16,16,16);
+  g.addColorStop(0,"rgba(255,240,205,1)");
+  g.addColorStop(.35,"rgba(255,232,170,.55)");
+  g.addColorStop(1,"rgba(255,225,150,0)");
+  c.fillStyle=g;c.fillRect(0,0,32,32);
+  return s;
+})();
 function buildDust(){
-  ddpr=Math.min(devicePixelRatio||1,2);
+  ddpr=Math.min(devicePixelRatio||1,LOW?1:2);
   DW=innerWidth;DH=innerHeight;
   dustC.width=DW*ddpr;dustC.height=DH*ddpr;dustC.style.height=DH+"px";
   dctx.setTransform(ddpr,0,0,ddpr,0,0);
-  const n=innerWidth<820?38:80;
+  const n=LOW?22:80;
   motes=[];
   for(let i=0;i<n;i++) motes.push({
     x:Math.random()*DW,y:Math.random()*DH,
@@ -661,13 +693,11 @@ function drawDust(t,wind){
     if(m.y<-10){m.y=DH+10;m.x=Math.random()*DW;}
     if(m.x<-10)m.x=DW+10; if(m.x>DW+10)m.x=-10;
     const tw=.65+.35*Math.sin(t*1.6+m.ph);
-    dctx.beginPath();
-    dctx.arc(m.x,m.y,m.r,0,6.283);
-    dctx.fillStyle=`rgba(255,236,186,${m.a*tw})`;
-    dctx.shadowBlur=m.r*4;dctx.shadowColor="rgba(255,225,150,.8)";
-    dctx.fill();
+    const d=m.r*5;
+    dctx.globalAlpha=m.a*tw;
+    dctx.drawImage(moteSprite,m.x-d/2,m.y-d/2,d,d);
   }
-  dctx.shadowBlur=0;
+  dctx.globalAlpha=1;
 }
 
 /* =============================================================
@@ -719,14 +749,38 @@ addEventListener("touchmove",e=>{
   tx=(t.clientX/innerWidth)*2-1;ty=(t.clientY/innerHeight)*2-1;
 },{passive:true});
 
+/* Reconstruir la escena es caro. En móvil el navegador dispara resize cada vez
+   que aparece/desaparece la barra de direcciones: se ignoran esos cambios de
+   solo altura y todo lo demás se agrupa con un retardo. */
+let lastW=innerWidth,lastH=innerHeight,resizeTimer=0;
 function resize(){
-  grassBack.build();grassFront.build();buildDust();buildGarden();
+  grassBack.build();grassFront.build();buildDust();buildGarden();measure();
+  lastW=innerWidth;lastH=innerHeight;
 }
-addEventListener("resize",resize,{passive:true});
-addEventListener("orientationchange",resize,{passive:true});
+function onResize(){
+  const dw=Math.abs(innerWidth-lastW), dh=Math.abs(innerHeight-lastH);
+  if(dw<2 && dh<140) return;              // solo se movió la barra del navegador
+  clearTimeout(resizeTimer);
+  resizeTimer=setTimeout(resize,260);
+}
+addEventListener("resize",onResize,{passive:true});
+addEventListener("orientationchange",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(resize,320);},{passive:true});
 
 const t0=performance.now();
-let lastBlur=-1, lastDof=-1;
+let lastBlur=-1, lastDof=-1, canvasTick=0, activeItem=-1, lastScrim=-1;
+
+/* ---- medidas cacheadas: leer layout en cada frame provoca tirones ---- */
+let docH=1,tlTop=0,tlH=1,itemMid=[];
+function measure(){
+  docH=Math.max(1,document.documentElement.scrollHeight-innerHeight);
+  if(tl){
+    const r=tl.getBoundingClientRect();
+    tlTop=r.top+scrollY; tlH=r.height||1;
+    itemMid=items.map(it=>{const b=it.getBoundingClientRect();return b.top+scrollY+b.height/2;});
+  }
+}
+addEventListener("load",()=>{measure();setTimeout(measure,600);});
+measure();
 
 /* ---- INTRO: primero solo ellos, luego el jardín ---- */
 const INTRO_DUR=1.0;                 // segundos de pantalla negra solo con ellos
@@ -740,8 +794,8 @@ if(reduced){
 function frame(now){
   const time=((now||performance.now())-t0)/1000;
   const vh=innerHeight;
-  const doc=Math.max(1,document.documentElement.scrollHeight-vh);
-  const p=clamp((scrollY||0)/doc);
+  const y=scrollY||0;
+  const p=clamp(y/docH);            // medidas cacheadas: nada de reflow por frame
   const st=stageAt(p);
 
   /* ---- viento: brisa base + ráfagas ---- */
@@ -767,13 +821,16 @@ function frame(now){
     /* leve deriva del mundo (sin 3D: el 3D vive dentro de .parents) */
     world.style.transform=`translate3d(${cx*-6}px,${cy*-4}px,0)`;
 
-    /* jardín vivo detrás */
-    drawGarden(time,wind,p,cx,cy);
+    /* jardín vivo detrás (solo traslación, sin repintar) */
+    moveGarden(time,wind,p,cx,cy);
 
-    /* sol que se mueve y palpita */
-    sun.style.setProperty("--sunx",(62+cx*8+Math.sin(time*.11)*4)+"%");
-    sun.style.setProperty("--suny",(14+cy*5+Math.cos(time*.09)*3)+"%");
-    sun.style.opacity=String(.75+.25*Math.sin(time*.5));
+    /* sol que se mueve y palpita (repintar gradientes a pantalla completa es
+       caro en móvil: allí se refresca 1 de cada 10 frames) */
+    if(!LOW || (canvasTick%10===0)){
+      sun.style.setProperty("--sunx",(62+cx*8+Math.sin(time*.11)*4).toFixed(1)+"%");
+      sun.style.setProperty("--suny",(14+cy*5+Math.cos(time*.09)*3).toFixed(1)+"%");
+      sun.style.opacity=(.75+.25*Math.sin(time*.5)).toFixed(2);
+    }
 
     /* ---- LOS PADRES: coreografía + vida propia ---- */
     const breathe=Math.sin(time*1.05)*.0055;          // respiración
@@ -784,7 +841,8 @@ function frame(now){
     /* durante la intro entran solos, desde un poco más lejos y desenfocados */
     const introScale=1+(1-introE)*0.14;
     const introY=(1-introE)*3.5;
-    parents.style.opacity=String(clamp(intro*1.5));
+    if(intro<1) parents.style.opacity=clamp(intro*1.5).toFixed(3);
+    else if(parents.style.opacity!=="1") parents.style.opacity="1";
     parents.style.transform=
       `perspective(1400px) translate3d(calc(-50% + ${st.x*stageMix}vw + ${cx*-14}px),${st.y*stageMix+introY}vh,0) `+
       `scale(${st.s*introScale}) rotateY(${(st.ry+cx*4).toFixed(2)}deg) rotateX(${(-cy*1.6).toFixed(2)}deg)`;
@@ -795,37 +853,51 @@ function frame(now){
     pShadow.style.opacity=String(.75-Math.abs(bob)*.05);
 
     /* rim-light que sigue al sol */
-    rim.style.setProperty("--rimx",(74+cx*12+Math.sin(time*.3)*3)+"%");
-    rim.style.setProperty("--rimy",(16+cy*8)+"%");
-    rim.style.opacity=String(.42+.18*Math.sin(time*.6));
+    if(!LOW){
+      rim.style.setProperty("--rimx",(74+cx*12+Math.sin(time*.3)*3).toFixed(1)+"%");
+      rim.style.setProperty("--rimy",(16+cy*8).toFixed(1)+"%");
+      rim.style.opacity=(.42+.18*Math.sin(time*.6)).toFixed(2);
+    }
 
     /* profundidad de campo: los padres se desenfocan un pelín al alejarse */
-    const totalBlur=st.dof*0.9+(1-introE)*9;
-    if(Math.abs(totalBlur-lastDof)>.08){
-      pInner.style.filter=totalBlur>.05?`blur(${totalBlur.toFixed(2)}px)`:"none";
-      lastDof=totalBlur;
+    /* desenfoque de la figura: se omite en móvil (filter sobre imagen grande = caro) */
+    if(!LOW){
+      const totalBlur=st.dof*0.9+(1-introE)*9;
+      if(Math.abs(totalBlur-lastDof)>.08){
+        pInner.style.filter=totalBlur>.05?`blur(${totalBlur.toFixed(2)}px)`:"none";
+        lastDof=totalBlur;
+      }
     }
 
-    /* hierba */
-    grassBack.draw(time,wind*.55);
-    grassFront.draw(time,wind);
-    drawDust(time,wind*.35);
+    canvasTick++;
+    /* hierba y polen: en móvil a 30 fps, es lo más caro de la escena */
+    if(!LOW || (canvasTick&1)){
+      grassBack.draw(time,wind*.55);
+      grassFront.draw(time,wind);
+      drawDust(time,wind*.35);
+    }
   }
 
-  scrim.style.opacity=String(st.scrim);
+  if(Math.abs(st.scrim-lastScrim)>.01){          // evita repintar el velo cada frame
+    scrim.style.opacity=st.scrim.toFixed(2);
+    lastScrim=st.scrim;
+  }
 
-  /* ---- timeline ---- */
-  if(tl){
-    const r=tl.getBoundingClientRect();
-    const prog=clamp((vh*.62-r.top)/(r.height||1));
+  /* ---- timeline (con posiciones cacheadas) ---- */
+  if(items.length){
+    const prog=clamp((y+vh*.62-tlTop)/tlH);
     tlFill.style.transform=`scaleY(${reduced?1:prog})`;
-    const mid=vh*.45;let best=null,bd=1e9;
-    for(const it of items){
-      const b=it.getBoundingClientRect();
-      const d=Math.abs(b.top+b.height/2-mid);
-      if(b.bottom>0&&b.top<vh&&d<bd){bd=d;best=it;}
+    const focus=y+vh*.45;
+    let bi=-1,bd=1e9;
+    for(let i=0;i<itemMid.length;i++){
+      const d=Math.abs(itemMid[i]-focus);
+      if(d<bd){bd=d;bi=i;}
     }
-    items.forEach(it=>it.classList.toggle("on",it===best));
+    if(bi!==activeItem){
+      if(activeItem>=0) items[activeItem].classList.remove("on");
+      if(bd<vh*.6){ items[bi].classList.add("on"); activeItem=bi; }
+      else activeItem=-1;
+    }
   }
 
   requestAnimationFrame(frame);
