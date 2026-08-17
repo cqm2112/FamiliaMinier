@@ -170,7 +170,7 @@ section{position:relative}
 .eyebrow{font-size:clamp(10px,1.1vw,12px);letter-spacing:.42em;text-transform:uppercase;
   color:var(--gold-soft);margin:0 0 clamp(12px,2vh,20px);display:flex;align-items:center;gap:14px;
   text-shadow:0 2px 14px rgba(0,0,0,.7);
-  opacity:0;transition:opacity 1.2s ease 1.15s}
+  opacity:0;transition:opacity 1.2s ease 1.65s}
 .ready .eyebrow{opacity:1}
 .eyebrow::after{content:"";height:1px;flex:1;max-width:170px;background:linear-gradient(90deg,rgba(232,217,160,.4),transparent)}
 .hero .eyebrow{justify-content:center}
@@ -183,14 +183,14 @@ section{position:relative}
 .ch{display:inline-block;transform:translateY(1.1em) rotate(3deg);opacity:0;filter:blur(10px)}
 .hero__sub{margin:clamp(10px,1.4vh,16px) auto 0;max-width:46ch;font-size:clamp(13.5px,1.35vw,16px);
   line-height:1.65;color:var(--muted);opacity:0;transform:translateY(20px);
-  transition:all 1s cubic-bezier(.16,1,.3,1) 2.3s;
+  transition:all 1s cubic-bezier(.16,1,.3,1) 2.8s;
   text-shadow:0 2px 10px rgba(0,0,0,.95),0 0 30px rgba(0,0,0,.8);color:rgba(244,241,233,.9)}
 .ready .hero__sub{opacity:1;transform:none}
 /* invitación a deslizar */
 .scrollcue{
   display:inline-flex;flex-direction:column;align-items:center;gap:12px;
   text-decoration:none;color:var(--gold-soft);
-  opacity:0;transition:opacity .8s ease 2.9s,color .4s ease;
+  opacity:0;transition:opacity .8s ease 3.4s,color .4s ease;
 }
 .ready .scrollcue{opacity:1}
 .scrollcue:hover{color:#fff}
@@ -336,7 +336,7 @@ section{position:relative}
 
     <div class="parents" id="parents">
       <div class="parents__inner" id="parentsInner">
-        <img src="Padres-imagen-principal.png" alt="">
+        <img src="Padres-imagen-principal.png" alt="" fetchpriority="high" decoding="async">
         <div class="parents__fill"></div>
         <div class="parents__rim" id="rim"></div>
       </div>
@@ -395,15 +395,13 @@ section{position:relative}
     </div>
   </section>
 
-  <!--
-    ╔══════════════════════════════════════════════════════════════════════╗
-    ║  CÓMO AGREGAR LAS FOTOS DE LOS HIJOS                                 ║
-    ║  1. Copia cada foto en la carpeta  assets/hijos/                     ║
-    ║  2. Abajo, en el script, edita el array FAMILIA:                     ║
-    ║     { nombre:"Ana", rol:"Hija", foto:"assets/hijos/ana.jpg" }        ║
-    ║  3. Deja  foto:null  en los que aún no tengas (muestra silueta).     ║
-    ╚══════════════════════════════════════════════════════════════════════╝
-  -->
+  <!-- =====================================================================
+       CÓMO AGREGAR LAS FOTOS DE LOS HIJOS
+       1. Copia cada foto en la carpeta  assets/hijos/
+       2. Abajo, en el script, edita el array FAMILIA:
+             { nombre:"Ana", rol:"Hija", foto:"assets/hijos/ana.jpg" }
+       3. Deja  foto:null  en los que aún no tengas (muestra la silueta).
+       ===================================================================== -->
   <section class="band" id="s-familia">
     <div class="wrap">
       <div class="col col--center" style="max-width:900px">
@@ -447,6 +445,7 @@ const FAMILIA = [
   { nombre:"Hijo 6", rol:"Hija", foto:null }
 ];
 
+const pageStart = performance.now();
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const lerp=(a,b,n)=>a+(b-a)*n;
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
@@ -477,7 +476,7 @@ document.querySelectorAll("[data-split]").forEach(el=>{
   walk(el);
   el.querySelectorAll(".ch").forEach((c,i)=>{
     c.style.transition="transform 1.2s cubic-bezier(.16,1,.3,1),opacity .9s ease,filter 1s ease";
-    c.style.transitionDelay=(reduced?0:1.35+i*.03)+"s";  // después de la intro
+    c.style.transitionDelay=(reduced?0:1.85+i*.03)+"s";  // después de la intro
   });
   requestAnimationFrame(()=>requestAnimationFrame(()=>{
     el.querySelectorAll(".ch").forEach(c=>{c.style.transform="none";c.style.opacity="1";c.style.filter="none";});
@@ -531,7 +530,7 @@ let tileFar=null,tileNear=null,gardenReady=false,GW=0,GH=0;
 
 // regiones seguras de follaje dentro de la foto (x,y,w,h en fracción 0-1)
 const FOLLAJE=[
-  // las personas ocupan x 0.25–0.80: solo se toman franjas laterales
+  // las personas ocupan x 0.25—0.80: solo se toman franjas laterales
   [0.00,0.00,0.22,0.26],   // árboles arriba a la izquierda
   [0.80,0.00,0.20,0.26],   // follaje arriba a la derecha
   [0.00,0.44,0.17,0.26],   // arbustos bajos a la izquierda
@@ -584,8 +583,19 @@ function buildGarden(){
   gardenWrap.replaceChildren(tileFar,tileNear);
   gardenReady=true;
 }
-srcImg.onload=buildGarden;
+/* El jardín tarda ~100-300 ms en generarse. Si eso cae en mitad de la intro,
+   se ve un tirón: se construye siempre DESPU?S de que ellos hayan entrado. */
+let gardenPending=false;
+function buildGardenDeferred(){
+  if(gardenPending) return;
+  gardenPending=true;
+  const go=()=>{ buildGarden(); if(typeof measure==="function") measure(); };
+  const wait=Math.max(0,(INTRO_DUR*1000+120)-(performance.now()-pageStart));
+  setTimeout(()=>{ (window.requestIdleCallback||(f=>setTimeout(f,0)))(go,{timeout:400}); },wait);
+}
+srcImg.onload=buildGardenDeferred;
 srcImg.src="Padres-imagen-principal.jpg";
+if(srcImg.complete&&srcImg.naturalWidth) buildGardenDeferred();
 
 /* solo mueve capas: cero repintado */
 function moveGarden(time,wind,p,cx,cy){
@@ -766,12 +776,22 @@ function onResize(){
 addEventListener("resize",onResize,{passive:true});
 addEventListener("orientationchange",()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(resize,320);},{passive:true});
 
-const t0=performance.now();
+/* la intro no arranca hasta que el PNG está decodificado: si no, el primer
+   frame se come el tiempo de decodificación y la entrada se ve a tirones */
+let t0=pageStart;
+{
+  const pImg=document.querySelector(".parents img");
+  if(pImg&&pImg.decode){
+    pImg.decode().then(()=>{t0=performance.now();}).catch(()=>{});
+  }
+}
 let lastBlur=-1, lastDof=-1, canvasTick=0, activeItem=-1, lastScrim=-1;
 
 /* ---- medidas cacheadas: leer layout en cada frame provoca tirones ---- */
-let docH=1,tlTop=0,tlH=1,itemMid=[];
+let docH=1,tlTop=0,tlH=1,itemMid=[],VW=innerWidth,VH=innerHeight;
+let pTarget=0,pSmooth=0;
 function measure(){
+  VW=innerWidth;VH=innerHeight;
   docH=Math.max(1,document.documentElement.scrollHeight-innerHeight);
   if(tl){
     const r=tl.getBoundingClientRect();
@@ -783,8 +803,8 @@ addEventListener("load",()=>{measure();setTimeout(measure,600);});
 measure();
 
 /* ---- INTRO: primero solo ellos, luego el jardín ---- */
-const INTRO_DUR=1.0;                 // segundos de pantalla negra solo con ellos
-const ENTER_DUR=0.7;                 // lo que tarda su aparición dentro de ese segundo
+const INTRO_DUR=1.5;                 // segundos de pantalla negra solo con ellos
+const ENTER_DUR=1.05;                // lo que tarda su aparición dentro de ese tiempo
 let sceneRevealed=false;
 if(reduced){
   document.body.classList.add("scene-in");
@@ -795,7 +815,12 @@ function frame(now){
   const time=((now||performance.now())-t0)/1000;
   const vh=innerHeight;
   const y=scrollY||0;
-  const p=clamp(y/docH);            // medidas cacheadas: nada de reflow por frame
+  /* El scroll llega al hilo principal a saltos (sobre todo en móvil): se
+     persigue el objetivo con un lerp para que la escena se mueva fluida. */
+  pTarget=clamp(y/docH);
+  pSmooth+= (pTarget-pSmooth)*(reduced?1:0.14);
+  if(Math.abs(pTarget-pSmooth)<0.0004) pSmooth=pTarget;
+  const p=pSmooth;
   const st=stageAt(p);
 
   /* ---- viento: brisa base + ráfagas ---- */
@@ -843,9 +868,12 @@ function frame(now){
     const introY=(1-introE)*3.5;
     if(intro<1) parents.style.opacity=clamp(intro*1.5).toFixed(3);
     else if(parents.style.opacity!=="1") parents.style.opacity="1";
+    /* todo en píxeles: evita reevaluar vw/vh dentro del transform cada frame */
+    const px=(st.x*stageMix*VW/100)+cx*-14;
+    const py=((st.y*stageMix+introY)*VH/100);
     parents.style.transform=
-      `perspective(1400px) translate3d(calc(-50% + ${st.x*stageMix}vw + ${cx*-14}px),${st.y*stageMix+introY}vh,0) `+
-      `scale(${st.s*introScale}) rotateY(${(st.ry+cx*4).toFixed(2)}deg) rotateX(${(-cy*1.6).toFixed(2)}deg)`;
+      `perspective(1400px) translate3d(calc(-50% + ${px.toFixed(1)}px),${py.toFixed(1)}px,0) `+
+      `scale(${(st.s*introScale).toFixed(4)}) rotateY(${(st.ry+cx*4).toFixed(2)}deg) rotateX(${(-cy*1.6).toFixed(2)}deg)`;
     pInner.style.transform=
       `translate3d(${swayX+cx*6}px,${-bob-cy*4}px,0) rotate(${swayR}deg) `+
       `scale(${1+breathe},${1-breathe*.7})`;
