@@ -16,10 +16,19 @@
   --sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth}
+/* nada de desplazamiento lateral: ni barra, ni rebote, ni gesto */
+html{
+  scroll-behavior:smooth;
+  overflow-x:hidden;overflow-x:clip;      /* clip no crea contenedor de scroll */
+  overscroll-behavior-x:none;
+}
 body{
   margin:0;background:#0b1210;color:var(--bone);font-family:var(--sans);
-  overflow-x:hidden;-webkit-font-smoothing:antialiased;
+  width:100%;max-width:100%;
+  overflow-x:hidden;overflow-x:clip;
+  overscroll-behavior-x:none;
+  touch-action:pan-y pinch-zoom;          /* el dedo solo desplaza en vertical */
+  -webkit-font-smoothing:antialiased;
 }
 img{display:block;max-width:100%}
 
@@ -136,7 +145,7 @@ canvas.layer{position:absolute;left:0;bottom:0;width:100%;pointer-events:none}
 /* ============================================================
    CONTENIDO
    ============================================================ */
-.content{position:relative;z-index:10}
+.content{position:relative;z-index:10;max-width:100%;overflow-x:hidden;overflow-x:clip}
 .grain{
   position:fixed;inset:-50%;z-index:40;pointer-events:none;opacity:.075;mix-blend-mode:overlay;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
